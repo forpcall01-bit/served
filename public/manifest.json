@@ -3,7 +3,7 @@
   "short_name": "GameZone",
   "description": "PC Management System",
   "start_url": "/app",
-  "scope": "/app",
+  "scope": "/",
   "display": "standalone",
   "theme_color": "#0f0f0f",
   "background_color": "#0f0f0f",

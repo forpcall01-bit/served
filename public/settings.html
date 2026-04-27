@@ -128,7 +128,10 @@ window.currentGroupName = null;
 window.pcs = [];
 
 window.addEventListener('load', () => {
-  if (!requireAuth()) return;
+  if (!COMMON.token || !COMMON.user || !COMMON.serverUrl) {
+    window.location.href = '/app/login';
+    return;
+  }
   const group = JSON.parse(sessionStorage.getItem('gz_activeGroup') || 'null');
   if (!group) { window.location.href = '/app/groups'; return; }
   window.currentGroupId = group.id;
