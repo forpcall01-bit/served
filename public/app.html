@@ -1368,6 +1368,17 @@
     if (window._timerInterval) clearInterval(window._timerInterval);
     disconnectSocket();
   });
+
+  window.api = api;
+  window.fetchMe = fetchMe;
+  window.escapeHtml = escapeHtml;
+  window.getGroupRate = getGroupRate;
+  window.saveGroupRate = saveGroupRate;
+  window.loadSettingsPCs = loadSettingsPCs;
+  window.loadAdmins = loadAdmins;
+  window.renderDeletePCList = renderDeletePCList;
+  window.renderReorderPCList = renderReorderPCList;
+  window.getPrefs = getPrefs;
 })();
 </script>
 </body>
