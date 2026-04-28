@@ -164,56 +164,27 @@ router.get('/:groupId/history/export', [
       for (const row of rows) {
         const income = (row.sessionMins / 60) * hourlyRate;
         text += `${row.pcName}\n`;
-        text += `  Session Time: ${row.sessionMins}m | Free Time: ${row.freeMins}m | Income: $${income.toFixed(2)}\n`;
+        text += `  Session: ${row.sessionMins}m | Free Timer: ${row.freeMins}m | Income: $${income.toFixed(2)}\n`;
       }
       text += `${'-'.repeat(40)}\n`;
       text += `\n--- Total Summary ---\n`;
-      text += `Total Session Time: ${totalSessionMins}m (${(totalSessionMins/60).toFixed(1)} hrs)\n`;
-      text += `Total Free Time: ${totalFreeMins}m (${(totalFreeMins/60).toFixed(1)} hrs)\n`;
+      text += `Total Session: ${totalSessionMins}m (${(totalSessionMins/60).toFixed(1)} hrs)\n`;
+      text += `Total Free Timer: ${totalFreeMins}m (${(totalFreeMins/60).toFixed(1)} hrs)\n`;
       text += `Estimated Total Income: $${estimatedIncome.toFixed(2)}\n`;
       res.setHeader('Content-Type', 'text/plain');
       res.setHeader('Content-Disposition', `attachment; filename="${groupName.replace(/[^a-z0-9]/gi, '_')}_history.txt"`);
       res.send(text);
     } else if (format === 'excel') {
-      let csv = 'PC Name,Session Minutes,Free Minutes,Session Income\n';
+      let csv = 'PC Name,Session (mins),Free Timer (mins),Income\n';
       for (const row of rows) {
         const income = (row.sessionMins / 60) * hourlyRate;
         csv += `"${row.pcName}",${row.sessionMins},${row.freeMins},${income.toFixed(2)}\n`;
       }
-      csv += `\n"",,, \n`;
-      csv += `"TOTAL SESSION TIME",${totalSessionMins},,\n`;
-      csv += `"TOTAL FREE TIME",,${totalFreeMins},\n`;
-      csv += `"ESTIMATED TOTAL INCOME",,,${estimatedIncome.toFixed(2)}\n`;
       res.setHeader('Content-Type', 'text/csv');
       res.setHeader('Content-Disposition', `attachment; filename="${groupName.replace(/[^a-z0-9]/gi, '_')}_history.csv"`);
       res.send(csv);
-    } else if (format === 'pdf') {
-      const formatTime = (mins) => {
-        const hrs = Math.floor(mins / 60);
-        const minsOnly = mins % 60;
-        return hrs > 0 ? `${hrs}h ${minsOnly}m` : `${mins}m`;
-      };
-      let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${groupName} - History Report</title></head><body>`;
-      html += `<h1>GameZone History Report</h1>`;
-      html += `<h2>${groupName}</h2>`;
-      html += `<p><strong>Hourly Rate:</strong> $${hourlyRate.toFixed(2)}</p>`;
-      html += `<h3>PC Details</h3>`;
-      html += `<table border="1" cellpadding="8" style="border-collapse:collapse;width:100%;font-family:Arial,sans-serif">`;
-      html += `<tr style="background:#f0f0f0"><th>PC Name</th><th>Session Time</th><th>Free Time</th><th>Income</th></tr>`;
-      for (const row of rows) {
-        const income = (row.sessionMins / 60) * hourlyRate;
-        html += `<tr><td>${row.pcName}</td><td>${formatTime(row.sessionMins)}</td><td>${formatTime(row.freeMins)}</td><td>$${income.toFixed(2)}</td></tr>`;
-      }
-      html += `</table>`;
-      html += `<h3>Total Summary</h3>`;
-      html += `<table border="0" cellpadding="5" style="font-family:Arial,sans-serif">`;
-      html += `<tr><td><strong>Total Session Time:</strong></td><td>${formatTime(totalSessionMins)} (${(totalSessionMins/60).toFixed(1)} hours)</td></tr>`;
-      html += `<tr><td><strong>Total Free Time:</strong></td><td>${formatTime(totalFreeMins)} (${(totalFreeMins/60).toFixed(1)} hours)</td></tr>`;
-      html += `<tr><td><strong>Estimated Total Income:</strong></td><td style="font-weight:bold;color:green">$${estimatedIncome.toFixed(2)}</td></tr>`;
-      html += `</table></body></html>`;
-      res.setHeader('Content-Type', 'text/html');
-      res.setHeader('Content-Disposition', `attachment; filename="${groupName.replace(/[^a-z0-9]/gi, '_')}_history.html"`);
-      res.send(html);
+    } else {
+      res.status(400).json({ error: 'Invalid format. Use text or excel.' });
     }
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
