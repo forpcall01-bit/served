@@ -44,11 +44,17 @@
                 <button class="btn btn-primary btn-sm" onclick="handleSaveGroupRate()" style="padding:8px 14px;font-size:11px">Save</button>
               </div>
             </div>
-            <div style="background:var(--amber-bg);border:1px solid var(--amber-bd);border-radius:var(--r);padding:12px;margin:12px 0;font-size:11px;color:var(--amber)">
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><i class="fa-solid fa-triangle-exclamation"></i><strong>History will be deleted daily</strong></div>
-              <div id="flush-warning">Loading flush time...</div>
-            </div>
           </div>
+          <div style="background:var(--amber-bg);border:1px solid var(--amber-bd);border-radius:var(--r);padding:12px;margin:12px 0;font-size:11px;color:var(--amber)">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><i class="fa-solid fa-triangle-exclamation"></i><strong>History will be deleted daily</strong></div>
+            <div id="flush-warning">Loading flush time...</div>
+          </div>
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--t3);margin-bottom:12px">Export Data</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-ghost" onclick="exportHistory('text')"><i class="fa-solid fa-file-lines"></i> Text</button>
+            <button class="btn btn-ghost" onclick="exportHistory('excel')"><i class="fa-solid fa-file-csv"></i> Excel</button>
+          </div>
+          <div style="height:16px"></div>
           <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--t3);margin-bottom:12px">Administrators</div>
           <div id="admins-list"></div>
           <button class="btn btn-ghost" style="margin-top:12px" onclick="openSheet('sheet-addadmin')"><i class="fa-solid fa-user-plus"></i> Add Admin</button>
@@ -68,12 +74,6 @@
               </div>
             </div>
           </div>
-          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--t3);margin-bottom:12px">Export Data</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn btn-ghost" onclick="exportHistory('text')"><i class="fa-solid fa-file-lines"></i> Text</button>
-            <button class="btn btn-ghost" onclick="exportHistory('excel')"><i class="fa-solid fa-file-csv"></i> Excel</button>
-          </div>
-          <div style="height:16px"></div>
           <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--t3);margin-bottom:12px">Manage PCs</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-ghost" onclick="openSheet('sheet-reorderpc')"><i class="fa-solid fa-arrows-up-down"></i> Reorder</button>
@@ -183,22 +183,28 @@ function loadFlushTime() {
 function convertToLocalTime(singaporeTime) {
   try {
     const [hours, minutes] = singaporeTime.split(':').map(Number);
+    
+    // Singapore is UTC+8
+    const sgOffsetHours = 8;
     const now = new Date();
-    const sgDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes);
-    const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'Asia/Singapore'
-    });
-    const userFormatter = new Intl.DateTimeFormat('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: userTz
-    });
-    const sgStr = formatter.format(sgDate);
-    const userStr = userFormatter.format(sgDate);
-    return userStr;
+    const userOffsetMinutes = now.getTimezoneOffset(); // Negative if ahead of UTC
+    
+    // Calculate difference: user is behind (-) or ahead (+) of Singapore
+    const diffMinutes = -userOffsetMinutes - (sgOffsetHours * 60);
+    
+    let totalMinutes = hours * 60 + minutes + diffMinutes;
+    
+    // Handle day wrap
+    if (totalMinutes < 0) totalMinutes += 1440;
+    if (totalMinutes >= 1440) totalMinutes -= 1440;
+    
+    const localHours = Math.floor(totalMinutes / 60);
+    const localMins = totalMinutes % 60;
+    
+    const amPm = localHours >= 12 ? 'PM' : 'AM';
+    const displayHours = localHours === 0 ? 12 : (localHours > 12 ? localHours - 12 : localHours);
+    
+    return `${displayHours}:${String(localMins).padStart(2, '0')} ${amPm}`;
   } catch(e) {
     return singaporeTime;
   }
