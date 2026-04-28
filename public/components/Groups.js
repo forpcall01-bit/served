@@ -129,7 +129,7 @@
           '<span>Subscription expires in <strong id="expiry-days">0</strong> days — contact your provider to renew</span>' +
         '</div>' +
         '<div class="scroll-area"><div class="screen-pad" id="groups-list"></div></div>' +
-        '<button class="fab" data-action="newgroup" onclick="openSheet(\'sheet-newgroup\')"><i class="fa-solid fa-plus"></i> New Group</button>' +
+        (getPrefs().hideAddGroup ? '' : '<button class="fab" data-action="newgroup" onclick="openSheet(\'sheet-newgroup\')"><i class="fa-solid fa-plus"></i> New Group</button>') +
       '</div>' +
     '</div>' +
     '<div class="sheet-bg" id="bg-newgroup" onclick="closeSheet(\'sheet-newgroup\')"></div>' +

@@ -227,7 +227,7 @@
             '<div class="pc-grid" id="pc-grid"></div>' +
           '</div>' +
         '</div>' +
-        '<button class="fab" data-action="addpc" onclick="openSheet(\'sheet-addpc\')"><i class="fa-solid fa-plus"></i> Add PC</button>' +
+        (getPrefs().hideAddPC ? '' : '<button class="fab" data-action="addpc" onclick="openSheet(\'sheet-addpc\')"><i class="fa-solid fa-plus"></i> Add PC</button>') +
       '</div>' +
     '</div>' +
     '<div class="sheet-bg" id="bg-addpc" onclick="closeSheet(\'sheet-addpc\')"></div>' +
