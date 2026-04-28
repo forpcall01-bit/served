@@ -365,7 +365,7 @@
     if (_socket) { _socket.disconnect(); _socket = null; }
   };
 
-  PcControl.start = async function() {
+  PcControl.start = function() {
     const pc = JSON.parse(sessionStorage.getItem('gz_activePc') || 'null');
     const groupId = sessionStorage.getItem('gz_activeGroupId');
     if (!pc || !groupId) { navigateTo('dashboard'); return; }
@@ -373,14 +373,8 @@
     window.currentPcName = pc.name;
     window.currentGroupId = groupId;
     window.pc = pc;
-    // Fetch rate synchronously BEFORE rendering - ensures rate is available for immediate user actions
-    try {
-      const rateRes = await api('GET', '/groups/' + groupId + '/rate');
-      const rate = rateRes?.hourly_rate || 5;
-      sessionStorage.setItem('gz_hourly_rate_' + groupId, rate.toString());
-    } catch {
-      sessionStorage.setItem('gz_hourly_rate_' + groupId, '5');
-    }
+    // Rate is preloaded in sessionStorage when groups are loaded in Dashboard/Groups
+    // No API call needed here - reads from sessionStorage via getGroupRate()
     document.getElementById('app').innerHTML = PcControl.render(pc.name);
     setTimeout(async () => {
       try {

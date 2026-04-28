@@ -117,6 +117,12 @@
   Dashboard.switchGroup = function(id) {
     api('GET', '/groups').then(groups => {
       sessionStorage.setItem('gz_groups', JSON.stringify(groups));
+      // Preload hourly rates for all groups into sessionStorage
+      groups.forEach(g => {
+        if (g.id && g.hourly_rate) {
+          sessionStorage.setItem('gz_hourly_rate_' + g.id, g.hourly_rate.toString());
+        }
+      });
       const group = groups.find(g => g.id === id);
       if (group) {
         sessionStorage.setItem('gz_activeGroup', JSON.stringify(group));
