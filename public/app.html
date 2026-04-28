@@ -1360,17 +1360,18 @@
     if (!COMMON.token || !COMMON.user || !COMMON.serverUrl) {
       if (!isLoginPage) {
         window.location.href = '/app/login';
+        return;
       }
-      return;
+    } else {
+      const data = await fetchMe();
+      if (data) {
+        _lastKnownStatus = data.status;
+        COMMON.user = { ...COMMON.user, status: data.status, expiry_date: data.expiry_date };
+      }
+      startStatusPolling();
+      Components.prefetch();
     }
-    const data = await fetchMe();
-    if (data) {
-      _lastKnownStatus = data.status;
-      COMMON.user = { ...COMMON.user, status: data.status, expiry_date: data.expiry_date };
-    }
-    startStatusPolling();
     render();
-    Components.prefetch();
   });
 
   window.addEventListener('beforeunload', () => {
