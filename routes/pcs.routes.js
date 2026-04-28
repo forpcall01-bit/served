@@ -3,10 +3,51 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
 const { body, param, validationResult } = require('express-validator');
+const fs = require('fs');
+const path = require('path');
 const db = require('../db');
 const { authMiddleware, accountCheck } = require('../middleware/auth');
 const { canManageGroup } = require('../middleware/permissions');
 const { _pendingProcs, _historyCache } = require('../sockets/socketCache');
+
+const HISTORY_FILE = path.join(__dirname, '../data/history.json');
+const MAX_FREE_TIME_MINUTES = 600;
+
+const loadHistory = () => {
+  try {
+    if (fs.existsSync(HISTORY_FILE)) {
+      return JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
+    }
+  } catch(e) {}
+  return {};
+};
+
+const saveHistory = (data) => {
+  const dir = path.dirname(HISTORY_FILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(HISTORY_FILE, JSON.stringify(data, null, 2));
+};
+
+const getPcHistory = (pcId) => {
+  const all = loadHistory();
+  return all[pcId] || [];
+};
+
+const setPcHistory = (pcId, history) => {
+  const all = loadHistory();
+  all[pcId] = history;
+  saveHistory(all);
+  _historyCache[pcId] = history;
+};
+
+const addHistoryEntry = (pcId, entry) => {
+  const history = getPcHistory(pcId);
+  const newHistory = [entry, ...history];
+  const cutoff = Date.now() - (24 * 60 * 60 * 1000);
+  const filtered = newHistory.filter(h => h.at > cutoff);
+  setPcHistory(pcId, filtered);
+  return filtered;
+};
 
 const SAFE_PATH_REGEX = /^[a-zA-Z0-9\s\-_\.\\\/:]+$/;
 
@@ -120,6 +161,7 @@ router.post('/pcs/:pcId/session/start', [
     await db.update('pcs', p => p.id === pcId, { session_end, stopwatch_start: 0 });
     const price = pc.price_per_hour > 0 ? (duration_minutes / 60) * pc.price_per_hour : 0;
     await db.insert('sessions', { id: uuidv4(), pc_id: pcId, started_at: Math.floor(Date.now() / 1000), duration_minutes, price, ended_at: null });
+    addHistoryEntry(pcId, { id: uuidv4(), type: 'session', mode: 'paid', mins: duration_minutes, at: Date.now(), status: 'active', session_id });
     const remaining = duration_minutes * 60;
     io.to(`pc:${pcId}`).emit('session:start', { session_end, duration_minutes, remaining_seconds: remaining });
     io.to(`group:${pc.group_id}`).emit('group:'+pc.group_id+':pc-session', { pc_id: pcId, session_end, stopwatch_start: 0, payment_status: pc.payment_status });
@@ -149,17 +191,22 @@ router.post('/pcs/:pcId/session/add-time', [
     const current_end = pc.session_end > now ? pc.session_end : now;
     const new_end = current_end + minutes * 60;
     if (minutes < 0 && new_end <= now) {
-      const history = pc.time_history || [];
-      const newHistory = [{ mins: minutes, at: Date.now(), type: 'remove' }, ...history].slice(0, 5);
-      await db.update('pcs', p => p.id === pcId, { session_end: 0, stopwatch_start: 0, time_history: newHistory });
+      const parentHistory = getPcHistory(pcId).find(h => h.type === 'session' && h.status === 'active');
+      if (parentHistory) {
+        addHistoryEntry(pcId, { mins: minutes, at: Date.now(), type: 'remove', parentId: parentHistory.id });
+        addHistoryEntry(pcId, { id: parentHistory.id, type: 'session', mode: parentHistory.mode, mins: parentHistory.mins, at: parentHistory.at, status: 'ended', session_id: parentHistory.session_id, parentId: parentHistory.parentId });
+      }
+      await db.update('pcs', p => p.id === pcId, { session_end: 0, stopwatch_start: 0 });
       await db.update('sessions', s => s.pc_id === pcId && !s.ended_at, { ended_at: now });
       io.to(`pc:${pcId}`).emit('session:end', {});
       io.to(`group:${pc.group_id}`).emit('group:'+pc.group_id+':pc-session', { pc_id: pcId, session_end: 0, stopwatch_start: 0 });
       return res.json({ success: true, session_ended: true });
     }
-    const history = pc.time_history || [];
-    const newHistory = [{ mins: minutes, at: Date.now(), type: minutes > 0 ? 'add' : 'remove' }, ...history].slice(0, 5);
-    await db.update('pcs', p => p.id === pcId, { session_end: new_end, time_history: newHistory });
+    const parentHistory = getPcHistory(pcId).find(h => h.type === 'session' && h.status === 'active');
+    if (parentHistory) {
+      addHistoryEntry(pcId, { mins: minutes, at: Date.now(), type: minutes > 0 ? 'add' : 'remove', parentId: parentHistory.id });
+    }
+    await db.update('pcs', p => p.id === pcId, { session_end: new_end });
     const rem = new_end - now;
     io.to(`pc:${pcId}`).emit('session:add-time', { session_end: new_end, added_minutes: minutes, remaining_seconds: rem });
     io.to(`group:${pc.group_id}`).emit('group:'+pc.group_id+':pc-session', { pc_id: pcId, session_end: new_end, stopwatch_start: 0, payment_status: pc.payment_status });
@@ -176,6 +223,10 @@ router.post('/pcs/:pcId/session/end', [
     const pc = await db.get('pcs', p => p.id === pcId);
     if (!pc) return res.status(404).json({ error: 'PC not found' });
     if (!await canManageGroup(req.user.id, pc.group_id)) return res.status(403).json({ error: 'Forbidden' });
+    const parentHistory = getPcHistory(pcId).find(h => h.type === 'session' && h.status === 'active');
+    if (parentHistory) {
+      addHistoryEntry(pcId, { id: parentHistory.id, type: 'session', mode: parentHistory.mode, mins: parentHistory.mins, at: parentHistory.at, status: 'ended', session_id: parentHistory.session_id, parentId: parentHistory.parentId });
+    }
     await db.update('pcs', p => p.id === pcId, { session_end: 0, stopwatch_start: 0 });
     await db.update('sessions', s => s.pc_id === pcId && !s.ended_at, { ended_at: Math.floor(Date.now() / 1000) });
     io.to(`pc:${pcId}`).emit('session:end', {});
@@ -196,6 +247,7 @@ router.post('/pcs/:pcId/session/stopwatch', [
     if (!await canManageGroup(req.user.id, pc.group_id)) return res.status(403).json({ error: 'Forbidden' });
     const started_at = Math.floor(Date.now() / 1000);
     await db.update('pcs', p => p.id === pcId, { session_end: 0, stopwatch_start: started_at });
+    addHistoryEntry(pcId, { id: uuidv4(), type: 'session', mode: 'free', mins: 0, at: Date.now(), status: 'active', session_id });
     io.to(`pc:${pcId}`).emit('session:stopwatch', { started_at });
     io.to(`group:${pc.group_id}`).emit('group:'+pc.group_id+':pc-session', { pc_id: pcId, session_end: 0, stopwatch_start: started_at });
     res.json({ success: true, started_at, session_id });
@@ -211,6 +263,12 @@ router.post('/pcs/:pcId/session/stopwatch-end', [
     const pc = await db.get('pcs', p => p.id === pcId);
     if (!pc) return res.status(404).json({ error: 'PC not found' });
     if (!await canManageGroup(req.user.id, pc.group_id)) return res.status(403).json({ error: 'Forbidden' });
+    const now = Math.floor(Date.now() / 1000);
+    const elapsed = pc.stopwatch_start > 0 ? Math.floor((now - pc.stopwatch_start) / 60) : 0;
+    const parentHistory = getPcHistory(pcId).find(h => h.type === 'session' && h.mode === 'free' && h.status === 'active');
+    if (parentHistory) {
+      addHistoryEntry(pcId, { id: parentHistory.id, type: 'session', mode: 'free', mins: elapsed, at: parentHistory.at, status: 'ended', session_id: parentHistory.session_id, parentId: parentHistory.parentId });
+    }
     await db.update('pcs', p => p.id === pcId, { session_end: 0, stopwatch_start: 0 });
     io.to(`pc:${pcId}`).emit('session:stopwatch-end', {});
     io.to(`pc:${pcId}`).emit('command:lock', {});
@@ -218,6 +276,33 @@ router.post('/pcs/:pcId/session/stopwatch-end', [
     res.json({ success: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+let _stopwatchCheckInterval = null;
+const startStopwatchCheck = () => {
+  if (_stopwatchCheckInterval) return;
+  _stopwatchCheckInterval = setInterval(async () => {
+    try {
+      const allPcs = await db.filter('pcs', p => p.stopwatch_start > 0);
+      const now = Math.floor(Date.now() / 1000);
+      const io = global._io;
+      if (!io) return;
+      for (const pc of allPcs) {
+        const elapsed = Math.floor((now - pc.stopwatch_start) / 60);
+        if (elapsed >= MAX_FREE_TIME_MINUTES) {
+          const parentHistory = getPcHistory(pc.id).find(h => h.type === 'session' && h.mode === 'free' && h.status === 'active');
+          if (parentHistory) {
+            addHistoryEntry(pc.id, { id: parentHistory.id, type: 'session', mode: 'free', mins: elapsed, at: parentHistory.at, status: 'ended', session_id: parentHistory.session_id, auto_ended: true });
+          }
+          await db.update('pcs', p => p.id === pc.id, { session_end: 0, stopwatch_start: 0 });
+          io.to(`pc:${pc.id}`).emit('session:stopwatch-end', {});
+          io.to(`pc:${pc.id}`).emit('command:lock', {});
+          io.to(`group:${pc.group_id}`).emit('group:'+pc.group_id+':pc-session', { pc_id: pc.id, session_end: 0, stopwatch_start: 0 });
+        }
+      }
+    } catch(e) {}
+  }, 60000);
+};
+global._startStopwatchCheck = startStopwatchCheck;
 
 router.post('/pcs/:pcId/lock', [
   param('pcId').isUUID().withMessage('Invalid PC ID'),
@@ -354,11 +439,26 @@ router.get('/pcs/:pcId/history', [
     const pc = await db.get('pcs', p => p.id === pcId);
     if (!pc) return res.json({ history: [] });
     if (!await canManageGroup(req.user.id, pc.group_id)) return res.status(403).json({ error: 'Forbidden' });
-    if (_historyCache[pcId]) {
-      return res.json({ history: _historyCache[pcId] });
+    const allHistory = getPcHistory(pcId);
+    const history = allHistory.filter(h => !h.parentId);
+    _historyCache[pcId] = history;
+    res.json({ history });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/groups/:groupId/history', [
+  param('groupId').isUUID().withMessage('Invalid group ID'),
+], validate, async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    if (!await canManageGroup(req.user.id, groupId)) return res.status(403).json({ error: 'Forbidden' });
+    const pcs = await db.filter('pcs', p => p.group_id === groupId);
+    const all = loadHistory();
+    for (const pc of pcs) {
+      delete all[pc.id];
     }
-    _historyCache[pcId] = pc.time_history || [];
-    res.json({ history: pc.time_history || [] });
+    saveHistory(all);
+    res.json({ success: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 

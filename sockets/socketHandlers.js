@@ -156,15 +156,17 @@ module.exports = (io) => {
 
     socket.on('admin:request-history', async ({ group_id, pc_id }) => {
       if (!isValidUUID(group_id) || !isValidUUID(pc_id)) return;
-      if (_historyCache[pc_id]) {
-        io.to(`group:${group_id}`).emit('admin:history-update', { group_id, pc_id, history: _historyCache[pc_id] });
-      } else {
-        const pc = await db.get('pcs', p => p.id === pc_id);
-        if (pc) {
-          _historyCache[pc_id] = pc.time_history || [];
-          io.to(`group:${group_id}`).emit('admin:history-update', { group_id, pc_id, history: pc.time_history || [] });
+      let history = [];
+      try {
+        const HISTORY_FILE = require('path').join(__dirname, '../data/history.json');
+        if (require('fs').existsSync(HISTORY_FILE)) {
+          const all = JSON.parse(require('fs').readFileSync(HISTORY_FILE, 'utf8'));
+          history = all[pc_id] || [];
         }
-      }
+      } catch(e) {}
+      history = history.filter(h => !h.parentId);
+      _historyCache[pc_id] = history;
+      io.to(`group:${group_id}`).emit('admin:history-update', { group_id, pc_id, history });
     });
 
     socket.on('pc:processes', ({ processes, requestId }) => {

@@ -54,7 +54,7 @@
         '<div class="action-card-sub">Timed or free timer</div>' +
         '</div></div>';
     }
-    const history = lhGet(pc.id);
+    const history = _cachedHistory;
     html += '<div class="section-head" style="justify-content:space-between;margin-top:20px">Recent Activity ' +
       '<button onclick="PcControl.refreshHistory()" style="margin-left:auto;background:var(--s3);border:1px solid var(--bd2);color:var(--t2);cursor:pointer;font-size:10px;font-family:var(--sans);display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:var(--r);letter-spacing:0;text-transform:none;font-weight:600;transition:all .15s" onmouseover="this.style.color=\'var(--t1)\'" onmouseout="this.style.color=\'var(--t2)\'"><i class="fa-solid fa-rotate" style="font-size:10px"></i> Refresh</button></div>' +
       '<div class="action-grid" style="padding-bottom:0;margin-bottom:20px;display:block">' +
@@ -66,8 +66,8 @@
         const isEnded = entry.status === 'ended';
         let valStr, label, icon;
         if (isSession) {
-          if (isFree) { icon = '⏱'; label = isEnded ? 'Free Session (ended)' : 'Free Session'; valStr = isEnded && entry.elapsed ? entry.elapsed + 'm' : 'FREE'; }
-          else { icon = '⏰'; const totalMins = (entry.minutes || 0) + (entry.added_minutes || 0); label = isEnded ? 'Session (ended)' : 'Session'; valStr = totalMins + 'm'; }
+          if (isFree) { icon = '⏱'; label = isEnded ? 'Free Session (ended)' : 'Free Session'; valStr = isEnded && entry.mins ? entry.mins + 'm' : 'FREE'; }
+          else { icon = '⏰'; label = isEnded ? 'Session (ended)' : 'Session'; valStr = (entry.mins || 0) + 'm'; }
         } else {
           const isAdd = entry.type === 'add';
           icon = isAdd ? '+' : '-';
@@ -116,7 +116,6 @@
       const r = await api('POST', '/pcs/' + window.currentPcId + '/session/start', { duration_minutes: mins, group_id: window.currentGroupId });
       window.pc.session_end = r.session_end;
       window.pc.stopwatch_start = 0;
-      lhAdd(window.currentPcId, { type: 'session', mode: 'paid', session_id: r.session_id || Date.now().toString(), minutes: mins, added_minutes: 0, started_at: Date.now(), ended_at: null, status: 'active' });
       toast('Session started', 'ok');
       PcControl.renderActions();
     } catch (e) { toast(e.message, 'err'); }
@@ -128,7 +127,6 @@
       const r = await api('POST', '/pcs/' + window.currentPcId + '/session/stopwatch', { group_id: window.currentGroupId });
       window.pc.stopwatch_start = r.started_at;
       window.pc.session_end = 0;
-      lhAdd(window.currentPcId, { type: 'session', mode: 'free', session_id: r.session_id || Date.now().toString(), minutes: 0, added_minutes: 0, started_at: Date.now(), ended_at: null, status: 'active' });
       toast('Free timer started', 'ok');
       PcControl.renderActions();
     } catch (e) { toast(e.message, 'err'); }
@@ -149,7 +147,6 @@
       const r = await api('POST', '/pcs/' + window.currentPcId + '/session/start', { duration_minutes: totalMins, group_id: window.currentGroupId });
       window.pc.session_end = r.session_end;
       window.pc.stopwatch_start = 0;
-      lhAdd(window.currentPcId, { type: 'session', mode: 'paid', session_id: r.session_id || Date.now().toString(), minutes: totalMins, added_minutes: 0, started_at: Date.now(), ended_at: null, status: 'active' });
       document.getElementById('session-amount').value = '';
       document.getElementById('session-mins').value = '';
       toast('Session started: ' + totalMins + 'm', 'ok');
@@ -289,9 +286,15 @@
     catch { toast(e.message, 'err'); }
   };
 
-  PcControl.refreshHistory = function() {
-    PcControl.renderActions();
+  PcControl.refreshHistory = async function() {
+    try {
+      const r = await api('GET', '/pcs/' + window.currentPcId + '/history');
+      _cachedHistory = r.history || [];
+      PcControl.renderActions();
+    } catch (e) { toast(e.message, 'err'); }
   };
+
+  let _cachedHistory = [];
 
   function handleStatusUpdate(data) {
     if (data.pc_id === window.currentPcId) {
@@ -311,7 +314,7 @@
 
   function handleHistoryUpdate(data) {
     if (data.pc_id === window.currentPcId) {
-      lhSet(data.pc_id, data.history || []);
+      _cachedHistory = data.history || [];
       PcControl.renderActions();
     }
   }
@@ -354,7 +357,11 @@
     window.currentGroupId = groupId;
     window.pc = pc;
     document.getElementById('app').innerHTML = PcControl.render(pc.name);
-    setTimeout(() => {
+    setTimeout(async () => {
+      try {
+        const r = await api('GET', '/pcs/' + pc.id + '/history');
+        _cachedHistory = r.history || [];
+      } catch {}
       PcControl.renderSidebarGroups();
       const sidebar = document.getElementById('sidebar-groups');
       if (sidebar) {

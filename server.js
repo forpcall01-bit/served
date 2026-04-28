@@ -126,6 +126,7 @@ db._ready.then(() => {
     console.log(`   Pages: / /groups /dashboard /pc-control /settings`);
     console.log(`   Admin panel: /connect\n`);
     initCronScheduler();
+    if (global._startStopwatchCheck) global._startStopwatchCheck();
   });
 }).catch(err => {
   console.error('Failed to connect to database:', err);

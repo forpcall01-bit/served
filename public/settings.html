@@ -67,6 +67,7 @@
           <div style="display:flex;flex-direction:column;gap:10px">
             <button class="btn btn-ghost" onclick="openSheet('sheet-reorderpc')"><i class="fa-solid fa-arrows-up-down"></i> Reorder PCs</button>
             <button class="btn btn-ghost" onclick="openSheet('sheet-deletepc')"><i class="fa-solid fa-trash"></i> Delete a PC</button>
+            <button class="btn btn-ghost" onclick="confirmDeleteHistory()"><i class="fa-solid fa-clock-rotate-left"></i> Clear Recent Activity</button>
             <button class="btn btn-danger btn-full" onclick="confirmDeleteGroup()"><i class="fa-solid fa-trash-can"></i> Delete Group</button>
             <button class="btn btn-danger btn-full" onclick="doLogout()"><i class="fa-solid fa-right-from-bracket"></i> Logout</button>
           </div>
@@ -284,6 +285,12 @@ function confirmDeleteGroup() {
   showModal('Delete Group?', 'Delete "' + window.currentGroupName + '"\nAll PCs in this group will be removed.', 'delete');
   document.getElementById('modal-confirm-btn').textContent = 'Delete';
   window._modalState = { type: 'delete', target: { type: 'group', id: window.currentGroupId, name: window.currentGroupName } };
+}
+
+function confirmDeleteHistory() {
+  showModal('Clear Recent Activity?', 'This will delete all recent activity data for this group.', 'delete');
+  document.getElementById('modal-confirm-btn').textContent = 'Delete';
+  window._modalState = { type: 'delete', target: { type: 'history', id: window.currentGroupId } };
 }
 
 function escapeHtml(str) {

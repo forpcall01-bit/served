@@ -165,6 +165,9 @@ async function executeAction() {
         toast('Group deleted', 'ok');
         if (typeof navigateTo === 'function') navigateTo('groups');
         else window.location.hash = '#/groups';
+      } else if (target.type === 'history') {
+        await api('DELETE', '/groups/' + target.id + '/history');
+        toast('Recent activity cleared', 'ok');
       }
     } else if (state.type === 'end-session') {
       if (typeof PcControl !== 'undefined' && PcControl.endSession) PcControl.endSession();
