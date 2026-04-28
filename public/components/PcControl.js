@@ -2,6 +2,7 @@
   const PcControl = window.PcControl = {};
   let _socket = null;
   let _timerInterval = null;
+  let _historyRefreshInterval = null;
 
   function updateOnlinePill() {
     const pc = window.pc;
@@ -315,7 +316,7 @@
   function handleHistoryUpdate(data) {
     if (data.pc_id === window.currentPcId) {
       _cachedHistory = data.history || [];
-      PcControl.renderActions();
+      PcControl.refreshHistory();
     }
   }
 
@@ -372,8 +373,10 @@
       }
       updateOnlinePill();
       PcControl.renderActions();
+      PcControl.refreshHistory();
       PcControl.connectSocket();
       _timerInterval = setInterval(updateTimer, 1000);
+      _historyRefreshInterval = setInterval(() => PcControl.refreshHistory(), 30000);
     }, 0);
     return true;
   };
@@ -381,6 +384,7 @@
   PcControl.cleanup = function() {
     PcControl.disconnectSocket();
     if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
+    if (_historyRefreshInterval) { clearInterval(_historyRefreshInterval); _historyRefreshInterval = null; }
   };
 
   PcControl.render = function(pcName) {
