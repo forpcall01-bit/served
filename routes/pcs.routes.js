@@ -3,45 +3,24 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
 const { body, param, validationResult } = require('express-validator');
-const fs = require('fs');
-const path = require('path');
 const db = require('../db');
 const { authMiddleware, accountCheck } = require('../middleware/auth');
 const { canManageGroup } = require('../middleware/permissions');
-const { _pendingProcs, _historyCache } = require('../sockets/socketCache');
+const { _pendingProcs } = require('../sockets/socketCache');
 
-const HISTORY_FILE = path.join(__dirname, '../data/history.json');
 const MAX_FREE_TIME_MINUTES = 600;
 
-const loadHistory = () => {
-  try {
-    if (fs.existsSync(HISTORY_FILE)) {
-      return JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
-    }
-  } catch(e) {}
-  return {};
+const getPcHistory = async (pcId) => {
+  const pc = await db.get('pcs', p => p.id === pcId);
+  return pc?.time_history || [];
 };
 
-const saveHistory = (data) => {
-  const dir = path.dirname(HISTORY_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(HISTORY_FILE, JSON.stringify(data, null, 2));
+const setPcHistory = async (pcId, history) => {
+  await db.update('pcs', p => p.id === pcId, { time_history: history });
 };
 
-const getPcHistory = (pcId) => {
-  const all = loadHistory();
-  return all[pcId] || [];
-};
-
-const setPcHistory = (pcId, history) => {
-  const all = loadHistory();
-  all[pcId] = history;
-  saveHistory(all);
-  _historyCache[pcId] = history;
-};
-
-const getChildEntries = (pcId, parentId) => {
-  const history = getPcHistory(pcId);
+const getChildEntries = async (pcId, parentId) => {
+  const history = await getPcHistory(pcId);
   return history.filter(h => h.parentId === parentId);
 };
 
@@ -58,32 +37,32 @@ const calculateParentMins = (parentEntry, childEntries, remainingSeconds = 0) =>
   return Math.max(0, total);
 };
 
-const addHistoryEntry = (pcId, entry) => {
-  const history = getPcHistory(pcId);
+const addHistoryEntry = async (pcId, entry) => {
+  const history = await getPcHistory(pcId);
   const newHistory = [entry, ...history];
   const cutoff = Date.now() - (24 * 60 * 60 * 1000);
   const filtered = newHistory.filter(h => h.at > cutoff);
-  setPcHistory(pcId, filtered);
+  await setPcHistory(pcId, filtered);
   return filtered;
 };
 
-const updateHistoryEntry = (pcId, entryId, updates) => {
-  const history = getPcHistory(pcId);
+const updateHistoryEntry = async (pcId, entryId, updates) => {
+  const history = await getPcHistory(pcId);
   const idx = history.findIndex(h => h.id === entryId);
   if (idx >= 0) {
     history[idx] = { ...history[idx], ...updates };
     const cutoff = Date.now() - (24 * 60 * 60 * 1000);
     const filtered = history.filter(h => h.at > cutoff);
-    setPcHistory(pcId, filtered);
+    await setPcHistory(pcId, filtered);
   }
 };
 
-const updateParentMins = (pcId, parentId, newMins) => {
-  const history = getPcHistory(pcId);
+const updateParentMins = async (pcId, parentId, newMins) => {
+  const history = await getPcHistory(pcId);
   const idx = history.findIndex(h => h.id === parentId);
   if (idx >= 0) {
     history[idx] = { ...history[idx], mins: newMins };
-    setPcHistory(pcId, history);
+    await setPcHistory(pcId, history);
   }
 };
 
@@ -228,14 +207,15 @@ router.post('/pcs/:pcId/session/add-time', [
     }
     const current_end = pc.session_end > now ? pc.session_end : now;
     const new_end = current_end + minutes * 60;
-    if (minutes < 0 && new_end <= now) {
-      const parentHistory = getPcHistory(pcId).find(h => h.type === 'session' && h.status === 'active');
-      if (parentHistory) {
-        addHistoryEntry(pcId, { mins: minutes, at: Date.now(), type: 'remove', parentId: parentHistory.id });
-        const childEntries = getChildEntries(pcId, parentHistory.id);
-        const remainingSeconds = parentHistory.mode === 'paid' && pc.session_end > now ? pc.session_end - now : 0;
-        const finalMins = calculateParentMins(parentHistory, childEntries, remainingSeconds);
-        updateHistoryEntry(pcId, parentHistory.id, { mins: finalMins, status: 'ended' });
+if (minutes < 0 && new_end <= now) {
+      const parentHistory = await getPcHistory(pcId);
+      const activeSession = parentHistory.find(h => h.type === 'session' && h.status === 'active');
+      if (activeSession) {
+        await addHistoryEntry(pcId, { mins: minutes, at: Date.now(), type: 'remove', parentId: activeSession.id });
+        const childEntries = parentHistory.filter(h => h.parentId === activeSession.id);
+        const remainingSeconds = activeSession.mode === 'paid' && pc.session_end > now ? pc.session_end - now : 0;
+        const finalMins = calculateParentMins(activeSession, childEntries, remainingSeconds);
+        await updateHistoryEntry(pcId, activeSession.id, { mins: finalMins, status: 'ended' });
       }
       await db.update('pcs', p => p.id === pcId, { session_end: 0, stopwatch_start: 0 });
       await db.update('sessions', s => s.pc_id === pcId && !s.ended_at, { ended_at: now });
@@ -243,11 +223,13 @@ router.post('/pcs/:pcId/session/add-time', [
       io.to(`group:${pc.group_id}`).emit('group:'+pc.group_id+':pc-session', { pc_id: pcId, session_end: 0, stopwatch_start: 0 });
       return res.json({ success: true, session_ended: true });
     }
-    const parentHistory = getPcHistory(pcId).find(h => h.type === 'session' && h.status === 'active');
-    if (parentHistory) {
-      addHistoryEntry(pcId, { mins: minutes, at: Date.now(), type: minutes > 0 ? 'add' : 'remove', parentId: parentHistory.id });
-      const newMins = (parentHistory.mins || 0) + minutes;
-      updateParentMins(pcId, parentHistory.id, newMins);
+
+    const parentHistory = await getPcHistory(pcId);
+    const activeSession = parentHistory.find(h => h.type === 'session' && h.status === 'active');
+    if (activeSession) {
+      await addHistoryEntry(pcId, { mins: minutes, at: Date.now(), type: minutes > 0 ? 'add' : 'remove', parentId: activeSession.id });
+      const newMins = (activeSession.mins || 0) + minutes;
+      await updateParentMins(pcId, activeSession.id, newMins);
     }
     await db.update('pcs', p => p.id === pcId, { session_end: new_end });
     const rem = new_end - now;
@@ -266,12 +248,13 @@ router.post('/pcs/:pcId/session/end', [
     const pc = await db.get('pcs', p => p.id === pcId);
     if (!pc) return res.status(404).json({ error: 'PC not found' });
     if (!await canManageGroup(req.user.id, pc.group_id)) return res.status(403).json({ error: 'Forbidden' });
-    const parentHistory = getPcHistory(pcId).find(h => h.type === 'session' && h.status === 'active');
-    if (parentHistory) {
+    const parentHistory = await getPcHistory(pcId);
+    const activeSession = parentHistory.find(h => h.type === 'session' && h.status === 'active');
+    if (activeSession) {
       const now = Math.floor(Date.now() / 1000);
-      const remainingSeconds = parentHistory.mode === 'paid' && pc.session_end > now ? pc.session_end - now : 0;
-      const finalMins = parentHistory.mins - Math.floor(remainingSeconds / 60);
-      updateHistoryEntry(pcId, parentHistory.id, { mins: finalMins, status: 'ended' });
+      const remainingSeconds = activeSession.mode === 'paid' && pc.session_end > now ? pc.session_end - now : 0;
+      const finalMins = activeSession.mins - Math.floor(remainingSeconds / 60);
+      await updateHistoryEntry(pcId, activeSession.id, { mins: finalMins, status: 'ended' });
     }
     await db.update('pcs', p => p.id === pcId, { session_end: 0, stopwatch_start: 0 });
     await db.update('sessions', s => s.pc_id === pcId && !s.ended_at, { ended_at: Math.floor(Date.now() / 1000) });
@@ -293,7 +276,7 @@ router.post('/pcs/:pcId/session/stopwatch', [
     if (!await canManageGroup(req.user.id, pc.group_id)) return res.status(403).json({ error: 'Forbidden' });
     const started_at = Math.floor(Date.now() / 1000);
     await db.update('pcs', p => p.id === pcId, { session_end: 0, stopwatch_start: started_at });
-    addHistoryEntry(pcId, { id: uuidv4(), type: 'session', mode: 'free', mins: 0, at: Date.now(), status: 'active', session_id });
+    await addHistoryEntry(pcId, { id: uuidv4(), type: 'session', mode: 'free', mins: 0, at: Date.now(), status: 'active', session_id });
     io.to(`pc:${pcId}`).emit('session:stopwatch', { started_at });
     io.to(`group:${pc.group_id}`).emit('group:'+pc.group_id+':pc-session', { pc_id: pcId, session_end: 0, stopwatch_start: started_at });
     res.json({ success: true, started_at, session_id });
@@ -311,9 +294,10 @@ router.post('/pcs/:pcId/session/stopwatch-end', [
     if (!await canManageGroup(req.user.id, pc.group_id)) return res.status(403).json({ error: 'Forbidden' });
     const now = Math.floor(Date.now() / 1000);
     const elapsed = pc.stopwatch_start > 0 ? Math.floor((now - pc.stopwatch_start) / 60) : 0;
-    const parentHistory = getPcHistory(pcId).find(h => h.type === 'session' && h.mode === 'free' && h.status === 'active');
-    if (parentHistory) {
-      updateHistoryEntry(pcId, parentHistory.id, { mins: elapsed, status: 'ended' });
+    const parentHistory = await getPcHistory(pcId);
+    const activeFreeSession = parentHistory.find(h => h.type === 'session' && h.mode === 'free' && h.status === 'active');
+    if (activeFreeSession) {
+      await updateHistoryEntry(pcId, activeFreeSession.id, { mins: elapsed, status: 'ended' });
     }
     await db.update('pcs', p => p.id === pcId, { session_end: 0, stopwatch_start: 0 });
     io.to(`pc:${pcId}`).emit('session:stopwatch-end', {});
@@ -335,9 +319,10 @@ const startStopwatchCheck = () => {
       for (const pc of allPcs) {
         const elapsed = Math.floor((now - pc.stopwatch_start) / 60);
         if (elapsed >= MAX_FREE_TIME_MINUTES) {
-          const parentHistory = getPcHistory(pc.id).find(h => h.type === 'session' && h.mode === 'free' && h.status === 'active');
-          if (parentHistory) {
-            updateHistoryEntry(pc.id, parentHistory.id, { mins: elapsed, status: 'ended', auto_ended: true });
+          const parentHistory = await getPcHistory(pc.id);
+          const activeFreeSession = parentHistory.find(h => h.type === 'session' && h.mode === 'free' && h.status === 'active');
+          if (activeFreeSession) {
+            await updateHistoryEntry(pc.id, activeFreeSession.id, { mins: elapsed, status: 'ended', auto_ended: true });
           }
           await db.update('pcs', p => p.id === pc.id, { session_end: 0, stopwatch_start: 0 });
           io.to(`pc:${pc.id}`).emit('session:stopwatch-end', {});
@@ -485,9 +470,8 @@ router.get('/pcs/:pcId/history', [
     const pc = await db.get('pcs', p => p.id === pcId);
     if (!pc) return res.json({ history: [] });
     if (!await canManageGroup(req.user.id, pc.group_id)) return res.status(403).json({ error: 'Forbidden' });
-    const allHistory = getPcHistory(pcId);
+    const allHistory = await getPcHistory(pcId);
     const history = allHistory.filter(h => !h.parentId);
-    _historyCache[pcId] = history;
     res.json({ history });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -499,11 +483,9 @@ router.delete('/groups/:groupId/history', [
     const { groupId } = req.params;
     if (!await canManageGroup(req.user.id, groupId)) return res.status(403).json({ error: 'Forbidden' });
     const pcs = await db.filter('pcs', p => p.group_id === groupId);
-    const all = loadHistory();
     for (const pc of pcs) {
-      delete all[pc.id];
+      await db.update('pcs', p => p.id === pc.id, { time_history: [] });
     }
-    saveHistory(all);
     res.json({ success: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });

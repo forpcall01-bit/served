@@ -134,18 +134,11 @@ router.get('/:groupId/history/export', [
     const group = await db.get('groups', g => g.id === groupId);
     const hourlyRate = group?.hourly_rate || 5;
     const pcs = await db.filter('pcs', p => p.group_id === groupId);
-    const HISTORY_FILE = require('path').join(__dirname, '../data/history.json');
-    let historyData = {};
-    try {
-      if (require('fs').existsSync(HISTORY_FILE)) {
-        historyData = JSON.parse(require('fs').readFileSync(HISTORY_FILE, 'utf8'));
-      }
-    } catch(e) {}
     const rows = [];
     let totalSessionMins = 0;
     let totalFreeMins = 0;
     for (const pc of pcs) {
-      const pcHistory = historyData[pc.id] || [];
+      const pcHistory = pc.time_history || [];
       const parentEntries = pcHistory.filter(h => h.type === 'session' && !h.parentId);
       let pcSessionMins = 0;
       let pcFreeMins = 0;
