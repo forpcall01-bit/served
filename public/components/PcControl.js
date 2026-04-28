@@ -146,8 +146,11 @@
     closeSheet('sheet-startsession');
     let totalMins = mins;
     if (amount && amount > 0) {
-      const rate = getGroupRate(window.currentGroupId);
-      totalMins += Math.floor((amount / rate) * 60);
+      try {
+        const rateRes = await api('GET', '/groups/' + window.currentGroupId + '/rate');
+        const rate = rateRes?.hourly_rate || 5;
+        totalMins += Math.floor((amount / rate) * 60);
+      } catch { totalMins += Math.floor((amount / 5) * 60); }
     }
     if (totalMins < 1) { toast('Duration too low', 'err'); return; }
     try {
@@ -179,16 +182,21 @@
     if (!amount && !mins) { toast('Enter amount or minutes', 'err'); return; }
     closeSheet('sheet-addtime');
     if (amount && amount > 0) {
-      const rate = getGroupRate(window.currentGroupId);
-      const calcMins = Math.floor((amount / rate) * 60);
-      if (calcMins < 1) { toast('Amount too low', 'err'); return; }
-      const r = await api('POST', '/pcs/' + window.currentPcId + '/session/add-time', { minutes: calcMins, group_id: window.currentGroupId });
-      if (r.stopwatch_start !== undefined) { window.pc.stopwatch_start = r.stopwatch_start; } else { window.pc.session_end = r.session_end; }
-      toast('Added: $' + amount.toFixed(2) + ' = ' + calcMins + 'm', 'ok');
+      try {
+        const rateRes = await api('GET', '/groups/' + window.currentGroupId + '/rate');
+        const rate = rateRes?.hourly_rate || 5;
+        const calcMins = Math.floor((amount / rate) * 60);
+        if (calcMins < 1) { toast('Amount too low', 'err'); return; }
+        const r = await api('POST', '/pcs/' + window.currentPcId + '/session/add-time', { minutes: calcMins, group_id: window.currentGroupId });
+        if (r.stopwatch_start !== undefined) { window.pc.stopwatch_start = r.stopwatch_start; } else { window.pc.session_end = r.session_end; }
+        toast('Added: $' + amount.toFixed(2) + ' = ' + calcMins + 'm', 'ok');
+      } catch { toast('Failed to add time', 'err'); }
     } else if (mins && mins > 0) {
-      const r = await api('POST', '/pcs/' + window.currentPcId + '/session/add-time', { minutes: mins, group_id: window.currentGroupId });
-      if (r.stopwatch_start !== undefined) { window.pc.stopwatch_start = r.stopwatch_start; } else { window.pc.session_end = r.session_end; }
-      toast('Added: ' + mins + 'm', 'ok');
+      try {
+        const r = await api('POST', '/pcs/' + window.currentPcId + '/session/add-time', { minutes: mins, group_id: window.currentGroupId });
+        if (r.stopwatch_start !== undefined) { window.pc.stopwatch_start = r.stopwatch_start; } else { window.pc.session_end = r.session_end; }
+        toast('Added: ' + mins + 'm', 'ok');
+      } catch { toast('Failed to add time', 'err'); }
     }
     document.getElementById('add-amount').value = '';
     document.getElementById('add-mins').value = '';

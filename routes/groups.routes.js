@@ -31,8 +31,7 @@ router.get('/', async (req, res) => {
     const memberGroupIds = (await db.filter('group_members', m => m.user_id === req.user.id)).map(m => m.group_id);
     const membered = await db.filter('groups', g => memberGroupIds.includes(g.id));
     const all = [...owned, ...membered].filter((g, i, arr) => arr.findIndex(x => x.id === g.id) === i);
-    const groupsWithRates = all.map(g => ({ ...g, hourly_rate: g.hourly_rate || 5 }));
-    res.json(groupsWithRates);
+    res.json(all);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -14,12 +14,6 @@
     try {
       window.groups = await api('GET', '/groups');
       sessionStorage.setItem('gz_groups', JSON.stringify(window.groups));
-      // Preload hourly rates for all groups into sessionStorage
-      window.groups.forEach(g => {
-        if (g.id && g.hourly_rate) {
-          sessionStorage.setItem('gz_hourly_rate_' + g.id, g.hourly_rate.toString());
-        }
-      });
       Groups.renderList();
     } catch (e) {
       if (e.message === 'account_pending') { if (COMMON.user) COMMON.user.status = 'pending'; }
