@@ -20,7 +20,7 @@ router.post('/', [
   try {
     const { name } = req.body;
     const id = uuidv4();
-    const group = await db.insert('groups', { id, name, owner_id: req.user.id, created_at: Date.now(), hourly_rate: 5 });
+    const group = await db.insert('groups', { id, name, owner_id: req.user.id, created_at: Date.now(), hourly_rate: 5, flush_time: '05:00' });
     res.json(group);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -127,6 +127,30 @@ router.put('/:groupId/rate', [
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+router.put('/:groupId/flush-time', [
+  param('groupId').isUUID().withMessage('Invalid group ID'),
+  body('flush_time').matches(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/).withMessage('Invalid time format (HH:MM)'),
+], validate, async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { flush_time } = req.body;
+    if (!await canManageGroup(req.user.id, groupId)) return res.status(403).json({ error: 'Forbidden' });
+    await db.update('groups', g => g.id === groupId, { flush_time });
+    res.json({ success: true, flush_time });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/:groupId/flush-time', [
+  param('groupId').isUUID().withMessage('Invalid group ID'),
+], validate, async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    if (!await canManageGroup(req.user.id, groupId)) return res.status(403).json({ error: 'Forbidden' });
+    const group = await db.get('groups', g => g.id === groupId);
+    res.json({ flush_time: group?.flush_time || '05:00' });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // Fast endpoint using in-memory cache (no DB query)
 router.get('/:groupId/rate', [
   param('groupId').isUUID().withMessage('Invalid group ID'),
@@ -168,7 +192,7 @@ router.get('/:groupId/history/export', [
       totalSessionMins += pcSessionMins;
       totalFreeMins += pcFreeMins;
     }
-    const estimatedIncome = (totalSessionMins / 60) * hourlyRate;
+    const estimatedIncome = ((totalSessionMins + totalFreeMins) / 60) * hourlyRate;
     const groupName = group?.name || 'Unknown';
     if (format === 'text') {
       let text = `GameZone History Report - ${groupName}\n`;
@@ -177,7 +201,7 @@ router.get('/:groupId/history/export', [
       text += '--- PC Details ---\n';
       text += `${'-'.repeat(40)}\n`;
       for (const row of rows) {
-        const income = (row.sessionMins / 60) * hourlyRate;
+        const income = ((row.sessionMins + row.freeMins) / 60) * hourlyRate;
         text += `${row.pcName}\n`;
         text += `  Session: ${row.sessionMins}m | Free Timer: ${row.freeMins}m | Income: $${income.toFixed(2)}\n`;
       }
@@ -190,10 +214,10 @@ router.get('/:groupId/history/export', [
       res.setHeader('Content-Disposition', `attachment; filename="${groupName.replace(/[^a-z0-9]/gi, '_')}_history.txt"`);
       res.send(text);
     } else if (format === 'excel') {
-      let csv = 'PC Name,Session (mins),Free Timer (mins),Income\n';
+      let csv = 'PC Name,Session (mins),Free Timer (mins),Income,Total Mins\n';
       for (const row of rows) {
-        const income = (row.sessionMins / 60) * hourlyRate;
-        csv += `"${row.pcName}",${row.sessionMins},${row.freeMins},${income.toFixed(2)}\n`;
+        const income = ((row.sessionMins + row.freeMins) / 60) * hourlyRate;
+        csv += `"${row.pcName}",${row.sessionMins},${row.freeMins},${income.toFixed(2)},${row.sessionMins + row.freeMins}\n`;
       }
       res.setHeader('Content-Type', 'text/csv');
       res.setHeader('Content-Disposition', `attachment; filename="${groupName.replace(/[^a-z0-9]/gi, '_')}_history.csv"`);

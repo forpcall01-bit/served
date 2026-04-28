@@ -147,6 +147,13 @@ db._ready.then(async () => {
   if (existingGroups.length > 0) {
     console.log(`Migrated ${existingGroups.length} groups with default hourly rate`);
   }
+  const flushTimeGroups = await db.filter('groups', g => !g.flush_time);
+  for (const group of flushTimeGroups) {
+    await db.update('groups', g => g.id === group.id, { flush_time: '05:00' });
+  }
+  if (flushTimeGroups.length > 0) {
+    console.log(`Migrated ${flushTimeGroups.length} groups with default flush time`);
+  }
   await loadRateCache();
   global.getCachedRate = getCachedRate;
   global.setCachedRate = setCachedRate;

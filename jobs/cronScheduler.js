@@ -37,6 +37,30 @@ function initCronScheduler() {
       console.error('[AUTO-END] Error:', e);
     }
   }, 60000);
+
+  setInterval(async () => {
+    try {
+      const now = new Date();
+      const singaporeTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Singapore' }));
+      const currentTime = `${String(singaporeTime.getHours()).padStart(2, '0')}:${String(singaporeTime.getMinutes()).padStart(2, '0')}`;
+      
+      const groups = await db.filter('groups', g => g.flush_time === currentTime);
+      for (const group of groups) {
+        const pcs = await db.filter('pcs', p => p.group_id === group.id);
+        for (const pc of pcs) {
+          if (pc.time_history && pc.time_history.length > 0) {
+            await db.update('pcs', p => p.id === pc.id, { time_history: [] });
+            console.log(`[FLUSH] History cleared for PC ${pc.name} in group ${group.name}`);
+          }
+        }
+        if (pcs.length > 0) {
+          console.log(`[FLUSH] ${pcs.length} PCs history cleared for group ${group.name}`);
+        }
+      }
+    } catch(e) {
+      console.error('[FLUSH] Error:', e);
+    }
+  }, 60000);
 }
 
 module.exports = {
