@@ -67,6 +67,17 @@ const addHistoryEntry = (pcId, entry) => {
   return filtered;
 };
 
+const updateHistoryEntry = (pcId, entryId, updates) => {
+  const history = getPcHistory(pcId);
+  const idx = history.findIndex(h => h.id === entryId);
+  if (idx >= 0) {
+    history[idx] = { ...history[idx], ...updates };
+    const cutoff = Date.now() - (24 * 60 * 60 * 1000);
+    const filtered = history.filter(h => h.at > cutoff);
+    setPcHistory(pcId, filtered);
+  }
+};
+
 const updateParentMins = (pcId, parentId, newMins) => {
   const history = getPcHistory(pcId);
   const idx = history.findIndex(h => h.id === parentId);
@@ -224,7 +235,7 @@ router.post('/pcs/:pcId/session/add-time', [
         const childEntries = getChildEntries(pcId, parentHistory.id);
         const remainingSeconds = parentHistory.mode === 'paid' && pc.session_end > now ? pc.session_end - now : 0;
         const finalMins = calculateParentMins(parentHistory, childEntries, remainingSeconds);
-        addHistoryEntry(pcId, { id: parentHistory.id, type: 'session', mode: parentHistory.mode, mins: finalMins, at: parentHistory.at, status: 'ended', session_id: parentHistory.session_id, parentId: parentHistory.parentId });
+        updateHistoryEntry(pcId, parentHistory.id, { mins: finalMins, status: 'ended' });
       }
       await db.update('pcs', p => p.id === pcId, { session_end: 0, stopwatch_start: 0 });
       await db.update('sessions', s => s.pc_id === pcId && !s.ended_at, { ended_at: now });
@@ -260,7 +271,7 @@ router.post('/pcs/:pcId/session/end', [
       const now = Math.floor(Date.now() / 1000);
       const remainingSeconds = parentHistory.mode === 'paid' && pc.session_end > now ? pc.session_end - now : 0;
       const finalMins = parentHistory.mins - Math.floor(remainingSeconds / 60);
-      addHistoryEntry(pcId, { id: parentHistory.id, type: 'session', mode: parentHistory.mode, mins: finalMins, at: parentHistory.at, status: 'ended', session_id: parentHistory.session_id, parentId: parentHistory.parentId });
+      updateHistoryEntry(pcId, parentHistory.id, { mins: finalMins, status: 'ended' });
     }
     await db.update('pcs', p => p.id === pcId, { session_end: 0, stopwatch_start: 0 });
     await db.update('sessions', s => s.pc_id === pcId && !s.ended_at, { ended_at: Math.floor(Date.now() / 1000) });
@@ -302,7 +313,7 @@ router.post('/pcs/:pcId/session/stopwatch-end', [
     const elapsed = pc.stopwatch_start > 0 ? Math.floor((now - pc.stopwatch_start) / 60) : 0;
     const parentHistory = getPcHistory(pcId).find(h => h.type === 'session' && h.mode === 'free' && h.status === 'active');
     if (parentHistory) {
-      addHistoryEntry(pcId, { id: parentHistory.id, type: 'session', mode: 'free', mins: elapsed, at: parentHistory.at, status: 'ended', session_id: parentHistory.session_id, parentId: parentHistory.parentId });
+      updateHistoryEntry(pcId, parentHistory.id, { mins: elapsed, status: 'ended' });
     }
     await db.update('pcs', p => p.id === pcId, { session_end: 0, stopwatch_start: 0 });
     io.to(`pc:${pcId}`).emit('session:stopwatch-end', {});
@@ -326,7 +337,7 @@ const startStopwatchCheck = () => {
         if (elapsed >= MAX_FREE_TIME_MINUTES) {
           const parentHistory = getPcHistory(pc.id).find(h => h.type === 'session' && h.mode === 'free' && h.status === 'active');
           if (parentHistory) {
-            addHistoryEntry(pc.id, { id: parentHistory.id, type: 'session', mode: 'free', mins: elapsed, at: parentHistory.at, status: 'ended', session_id: parentHistory.session_id, auto_ended: true });
+            updateHistoryEntry(pc.id, parentHistory.id, { mins: elapsed, status: 'ended', auto_ended: true });
           }
           await db.update('pcs', p => p.id === pc.id, { session_end: 0, stopwatch_start: 0 });
           io.to(`pc:${pc.id}`).emit('session:stopwatch-end', {});
