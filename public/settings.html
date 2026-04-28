@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="theme-color" content="#0f0f0f">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="GameZone">
@@ -42,6 +43,10 @@
                 <input type="text" id="group-rate-input" placeholder="5.00" inputmode="decimal" pattern="[0-9]*" oninput="this.value=this.value.replace(/[^0-9.]/g,'')" style="width:80px;background:var(--bg);border:1px solid var(--bd);border-radius:var(--r);padding:8px 10px;font-size:13px;color:var(--t1);outline:none">
                 <button class="btn btn-primary btn-sm" onclick="handleSaveGroupRate()" style="padding:8px 14px;font-size:11px">Save</button>
               </div>
+            </div>
+            <div style="background:var(--amber-bg);border:1px solid var(--amber-bd);border-radius:var(--r);padding:12px;margin:12px 0;font-size:11px;color:var(--amber)">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><i class="fa-solid fa-triangle-exclamation"></i><strong>History will be deleted daily</strong></div>
+              <div id="flush-warning">Loading flush time...</div>
             </div>
           </div>
           <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--t3);margin-bottom:12px">Administrators</div>
@@ -159,7 +164,45 @@ window.addEventListener('load', () => {
   loadPCs();
   loadSidebarGroups();
   applyPrefs();
+  loadFlushTime();
 });
+
+function loadFlushTime() {
+  try {
+    api('GET', '/groups/' + window.currentGroupId + '/flush-time').then(res => {
+      const flushTime = res.flush_time || '03:30';
+      const localTime = convertToLocalTime(flushTime);
+      const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      document.getElementById('flush-warning').innerHTML = 'PC usage history is cleared daily at <strong>' + flushTime + '</strong> (Singapore)<br>Your local time: <strong>' + localTime + '</strong> (' + userTz + ')<br>Download history before this time to keep records.';
+    }).catch(() => {
+      document.getElementById('flush-warning').innerHTML = 'PC usage history is cleared daily at <strong>03:30</strong> (Singapore).<br>Download history before this time to keep records.';
+    });
+  } catch(e) {}
+}
+
+function convertToLocalTime(singaporeTime) {
+  try {
+    const [hours, minutes] = singaporeTime.split(':').map(Number);
+    const now = new Date();
+    const sgDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes);
+    const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Asia/Singapore'
+    });
+    const userFormatter = new Intl.DateTimeFormat('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: userTz
+    });
+    const sgStr = formatter.format(sgDate);
+    const userStr = userFormatter.format(sgDate);
+    return userStr;
+  } catch(e) {
+    return singaporeTime;
+  }
+}
 
 async function loadSidebarGroups() {
   const el = document.getElementById('sidebar-groups');
